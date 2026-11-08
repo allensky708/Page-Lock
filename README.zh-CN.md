@@ -1,4 +1,4 @@
-# Page Lock（简体中文版）
+# Page Lock(中文版)
 
 > 把笔记锁住，解锁之前无法编辑——类似 Notion 的“锁定页面”，但用于 Obsidian。
 
@@ -8,7 +8,7 @@ Page Lock 刻意保持小巧、本地优先：不收集遥测，不发起网络�
 
 [English](./README.md) | **简体中文**
 
-这是 [Page Lock](https://github.com/haivri/obsidian-page-lock) 的简体中文本地化版本，基于上游 `1.2.2`，版本号 `1.3.0`，使用 i18n 方式实现中英双语界面。界面语言默认跟随 Obsidian，也可以在 **设置 → Page Lock → Language** 中切换。
+这是 [Page Lock](https://github.com/haivri/obsidian-page-lock) 的简体中文本地化版本，基于上游 `1.2.2`，版本号 `1.3.1`，使用 i18n 方式实现中英双语界面。界面语言默认跟随 Obsidian，也可以在 **设置 → Page Lock → Language** 中切换。
 
 汉化与维护：[allensky708](https://github.com/allensky708)。原项目版权归 Robert Fleming 所有，按 MIT 协议发布。
 
