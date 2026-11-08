@@ -404,3 +404,21 @@ test('plugin edit restriction can be disabled independently', async () => {
   plugin.installVaultGuard();
   await plugin.app.vault.modify(file, 'changed');
 });
+
+test('delete guard blocks locked files without throwing and allows after restriction is disabled', async () => {
+  const { plugin, file } = setup();
+  let deleted = 0;
+  plugin.app.vault.delete = async () => { deleted++; };
+  plugin.app.vault.trash = async () => { deleted++; };
+  plugin.app.fileManager.trashFile = async () => { deleted++; };
+  plugin.installVaultGuard();
+
+  await plugin.app.vault.delete(file);
+  assert.equal(deleted, 0);
+  await plugin.app.fileManager.trashFile(file);
+  assert.equal(deleted, 0);
+
+  plugin.settings.restrictDelete = false;
+  await plugin.app.vault.delete(file);
+  assert.equal(deleted, 1);
+});

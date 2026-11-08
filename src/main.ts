@@ -653,26 +653,33 @@ export default class NoteLockPlugin extends Plugin {
     const originalTrashFile = typeof fileManager.trashFile === 'function'
       ? fileManager.trashFile.bind(fileManager)
       : null;
-    const rejectDelete = (file: TAbstractFile): void => {
-      if (!this.settings.restrictDelete || !this.isProtected(file)) return;
-      new Notice(t('"{name}" is locked — unlock before deleting', { name: file.name }));
-      throw new Error(`Page Lock: "${file.path}" is locked`);
+    const rejectDelete = (file: TAbstractFile): boolean => {
+      if (!this.settings.restrictDelete || !this.isProtected(file)) return false;
+      new Notice(
+        t('"{name}" is locked and cannot be deleted. Unlock it first, or turn off "Block deletion".', {
+          name: file.name
+        }),
+        8000
+      );
+      // Resolve without deleting. Throwing here would make Obsidian show its own
+      // generic "failed to delete" error on top of our explanation.
+      return true;
     };
     if (originalDelete) {
       vault.delete = async (file, force) => {
-        rejectDelete(file);
+        if (rejectDelete(file)) return;
         return originalDelete(file, force);
       };
     }
     if (originalTrash) {
       vault.trash = async (file, system) => {
-        rejectDelete(file);
+        if (rejectDelete(file)) return;
         return originalTrash(file, system);
       };
     }
     if (originalTrashFile) {
       fileManager.trashFile = async (file) => {
-        rejectDelete(file);
+        if (rejectDelete(file)) return;
         return originalTrashFile(file);
       };
     }

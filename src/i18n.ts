@@ -28,7 +28,7 @@ const zh: Record<string, string> = {
 	'Page Lock: links in "{name}" changed before the rename could update them; the note was left unchanged.':
 		'Page Lock：“{name}”中的链接在重命名更新前发生了变化，笔记未做修改。',
 	'"{name}" is locked — unlock to edit': '“{name}”已锁定 — 解锁后才能编辑',
-	'"{name}" is locked — unlock before deleting': '“{name}”已锁定 — 请先解锁再删除',
+	'"{name}" is locked and cannot be deleted. Unlock it first, or turn off "Block deletion".': '“{name}”已锁定，不允许删除。请先解锁后再删除，或关闭“禁止删除”限制。',
 	'"{name}" is locked — unlock it from the file menu to view': '“{name}”已锁定 — 请从文件菜单解锁后查看',
 	'Locked canvas "{name}"': '已锁定白板“{name}”',
 	'Unlocked canvas "{name}"': '已解锁白板“{name}”',
