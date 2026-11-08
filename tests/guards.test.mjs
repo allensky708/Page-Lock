@@ -397,3 +397,10 @@ test('gallery update rechecks opt-out and stale content inside the atomic writer
     assert.equal(content.includes('new.png'), false);
   }
 });
+
+test('plugin edit restriction can be disabled independently', async () => {
+  const { plugin, file } = setup();
+  plugin.settings.restrictPluginEdit = false;
+  plugin.installVaultGuard();
+  await plugin.app.vault.modify(file, 'changed');
+});

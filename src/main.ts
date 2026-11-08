@@ -35,6 +35,10 @@ interface NoteLockSettings {
   lockedCanvasPaths: string[];
   passwordHash: string;
   passwordSalt: string;
+  restrictRead: boolean;
+  restrictManualEdit: boolean;
+  restrictPluginEdit: boolean;
+  restrictDelete: boolean;
 }
 
 const DEFAULT_SETTINGS: NoteLockSettings = {
@@ -45,7 +49,11 @@ const DEFAULT_SETTINGS: NoteLockSettings = {
   language: 'auto',
   lockedCanvasPaths: [],
   passwordHash: '',
-  passwordSalt: ''
+  passwordSalt: '',
+  restrictRead: false,
+  restrictManualEdit: true,
+  restrictPluginEdit: true,
+  restrictDelete: true
 };
 
 // --- Constants --------------------------------------------------------------
@@ -330,6 +338,7 @@ export default class NoteLockPlugin extends Plugin {
     this.registerEditorExtension([
       EditorState.transactionFilter.of((tr) => {
         if (!tr.docChanged) return tr;
+        if (!this.settings.restrictManualEdit) return tr;
         const file = tr.startState.field(editorInfoField, false)?.file;
         if (!file || !this.isFileLocked(file)) return tr;
         if (tr.annotation(reloadAnnotation)) return tr;
@@ -437,10 +446,19 @@ export default class NoteLockPlugin extends Plugin {
       }
     }));
 
-    this.registerEvent(this.app.workspace.on('file-open', () => this.refreshAllViews()));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshAllViews()));
+    this.registerEvent(this.app.workspace.on('file-open', (file) => {
+      this.refreshAllViews();
+      this.enforceReadRestriction(file);
+    }));
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+      this.refreshAllViews();
+      this.enforceReadRestriction(this.app.workspace.getActiveFile());
+    }));
     this.registerEvent(this.app.workspace.on('layout-change', () => this.refreshAllViews()));
-    this.app.workspace.onLayoutReady(() => this.refreshAllViews());
+    this.app.workspace.onLayoutReady(() => {
+      this.refreshAllViews();
+      this.enforceReadRestriction(this.app.workspace.getActiveFile());
+    });
 
     this.addSettingTab(new NoteLockSettingTab(this.app, this));
   }
@@ -467,6 +485,10 @@ export default class NoteLockPlugin extends Plugin {
       : [];
     this.settings.passwordHash = typeof this.settings.passwordHash === 'string' ? this.settings.passwordHash : '';
     this.settings.passwordSalt = typeof this.settings.passwordSalt === 'string' ? this.settings.passwordSalt : '';
+    this.settings.restrictRead = Boolean(this.settings.restrictRead);
+    this.settings.restrictManualEdit = this.settings.restrictManualEdit !== false;
+    this.settings.restrictPluginEdit = this.settings.restrictPluginEdit !== false;
+    this.settings.restrictDelete = this.settings.restrictDelete !== false;
     initLocale(this.settings.language);
   }
 
@@ -478,6 +500,7 @@ export default class NoteLockPlugin extends Plugin {
   applySettingsChange(clearStates: boolean): void {
     if (clearStates) this.lockStates.clear();
     this.refreshAllViews();
+    this.enforceReadRestriction(this.app.workspace.getActiveFile());
   }
 
   // --- Lock state ---
@@ -495,6 +518,7 @@ export default class NoteLockPlugin extends Plugin {
   }
 
   private stateIsLocked(state: EditorState): boolean {
+    if (!this.settings.restrictManualEdit) return false;
     const file = state.field(editorInfoField, false)?.file;
     return !!file && this.isFileLocked(file);
   }
@@ -552,6 +576,7 @@ export default class NoteLockPlugin extends Plugin {
     // anything reacting to the metadata change sees a fresh editor.
     if (locked) await this.syncEditorsToDisk(file);
     this.refreshAllViews();
+    if (locked) this.enforceReadRestriction(file);
   }
 
   /**
@@ -629,7 +654,7 @@ export default class NoteLockPlugin extends Plugin {
       ? fileManager.trashFile.bind(fileManager)
       : null;
     const rejectDelete = (file: TAbstractFile): void => {
-      if (!this.isProtected(file)) return;
+      if (!this.settings.restrictDelete || !this.isProtected(file)) return;
       new Notice(t('"{name}" is locked — unlock before deleting', { name: file.name }));
       throw new Error(`Page Lock: "${file.path}" is locked`);
     };
@@ -753,6 +778,7 @@ export default class NoteLockPlugin extends Plugin {
   }
 
   private isGuarded(file: TFile): boolean {
+    if (!this.settings.restrictPluginEdit) return false;
     if (!(file instanceof TFile)) return false;
     const locked = file.extension === 'canvas'
       ? this.isCanvasLocked(file.path)
@@ -764,6 +790,23 @@ export default class NoteLockPlugin extends Plugin {
     if (!(file instanceof TFile)) return false;
     if (file.extension === 'canvas') return this.isCanvasLocked(file.path);
     return file.extension === 'md' && this.isFileLocked(file);
+  }
+
+  private isLockedFile(file: TFile): boolean {
+    if (file.extension === 'canvas') return this.isCanvasLocked(file.path);
+    return file.extension === 'md' && this.isFileLocked(file);
+  }
+
+  private enforceReadRestriction(file: TFile | null): void {
+    if (!file || !this.settings.restrictRead || !this.isLockedFile(file)) return;
+    const leaf = this.app.workspace.getLeaf(false);
+    const viewFile = (leaf?.view as { file?: TFile } | undefined)?.file;
+    if (!leaf || viewFile?.path !== file.path) return;
+    new Notice(t('"{name}" is locked — unlock it from the file menu to view', { name: file.basename }));
+    window.setTimeout(() => {
+      const current = (leaf.view as { file?: TFile } | undefined)?.file;
+      if (current?.path === file.path) leaf.detach();
+    }, 0);
   }
 
   private guardRejection(file: TFile): Promise<never> | null {
@@ -809,6 +852,7 @@ export default class NoteLockPlugin extends Plugin {
     this.settings.lockedCanvasPaths = [...paths];
     await this.saveSettings();
     this.refreshAllViews();
+    if (locked) this.enforceReadRestriction(file);
     new Notice(t(locked ? 'Locked canvas "{name}"' : 'Unlocked canvas "{name}"', { name: file.basename }));
   }
 
@@ -826,13 +870,14 @@ export default class NoteLockPlugin extends Plugin {
     const file = view.file;
     if (!file || file.extension !== 'canvas') return;
     const locked = this.isCanvasLocked(file.path);
+    const manualLocked = locked && this.settings.restrictManualEdit;
     const canvas = view.canvas;
     if (canvas) {
-      if (typeof canvas.setReadonly === 'function') canvas.setReadonly(locked);
-      else if (typeof canvas.setReadOnly === 'function') canvas.setReadOnly(locked);
+      if (typeof canvas.setReadonly === 'function') canvas.setReadonly(manualLocked);
+      else if (typeof canvas.setReadOnly === 'function') canvas.setReadOnly(manualLocked);
       else {
-        canvas.readonly = locked;
-        canvas.readOnly = locked;
+        canvas.readonly = manualLocked;
+        canvas.readOnly = manualLocked;
       }
     }
     view.containerEl.querySelectorAll(`.${ACTION_CLASS}`).forEach((el) => el.remove());
@@ -847,6 +892,7 @@ export default class NoteLockPlugin extends Plugin {
     if (this.guardedViews.has(view)) return;
     this.guardedViews.add(view);
     const intercept = (event: Event): void => {
+      if (!this.settings.restrictManualEdit) return;
       // Use the event path so controls also work in detached Obsidian windows.
       const target = event.composedPath()[0] as Element | undefined;
       if (!target || typeof target.closest !== 'function') return;
@@ -916,11 +962,12 @@ export default class NoteLockPlugin extends Plugin {
     const file = view.file;
     if (!file || file.extension !== 'md') return;
     const locked = this.isFileLocked(file);
-    view.contentEl.classList.toggle('note-lock-images-locked', locked);
+    const manualLocked = locked && this.settings.restrictManualEdit;
+    view.contentEl.classList.toggle('note-lock-images-locked', manualLocked);
 
     const cm = (view.editor as unknown as { cm?: EditorView }).cm;
-    if (cm && cm.state.field(this.lockedField, false) !== locked) {
-      cm.dispatch({ effects: this.setLockedEffect.of(locked) });
+    if (cm && cm.state.field(this.lockedField, false) !== manualLocked) {
+      cm.dispatch({ effects: this.setLockedEffect.of(manualLocked) });
     }
 
     const action = locked
@@ -933,8 +980,8 @@ export default class NoteLockPlugin extends Plugin {
     // The inline title is a contenteditable element outside CodeMirror; left
     // alone it would still allow renaming a locked note.
     view.contentEl.querySelectorAll<HTMLElement>('.inline-title').forEach((el) => {
-      el.contentEditable = 'false';
-      el.addClass(TITLE_LOCKED_CLASS);
+      el.contentEditable = manualLocked ? 'false' : 'true';
+      el.classList.toggle(TITLE_LOCKED_CLASS, manualLocked);
     });
 
     if (!this.settings.showLockBanner) return;
@@ -1030,6 +1077,32 @@ class NoteLockSettingTab extends PluginSettingTab {
         }
       },
       {
+        type: 'group',
+        heading: t('Lock restrictions'),
+        items: [
+          {
+            name: t('Block viewing'),
+            desc: t('When locked, close the file instead of showing its content in Obsidian. The file is still readable by other apps and search.'),
+            control: { type: 'toggle', key: 'restrictRead', defaultValue: DEFAULT_SETTINGS.restrictRead }
+          },
+          {
+            name: t('Block manual editing'),
+            desc: t('Make the editor read-only while the file is locked.'),
+            control: { type: 'toggle', key: 'restrictManualEdit', defaultValue: DEFAULT_SETTINGS.restrictManualEdit }
+          },
+          {
+            name: t('Block plugin edits'),
+            desc: t('Reject writes from other plugins while the file is locked. Manual saves are also rejected when this is on.'),
+            control: { type: 'toggle', key: 'restrictPluginEdit', defaultValue: DEFAULT_SETTINGS.restrictPluginEdit }
+          },
+          {
+            name: t('Block deletion'),
+            desc: t('Reject deleting the locked file inside Obsidian.'),
+            control: { type: 'toggle', key: 'restrictDelete', defaultValue: DEFAULT_SETTINGS.restrictDelete }
+          }
+        ]
+      },
+      {
         name: t('Language'),
         desc: t("Choose the language used by Page Lock. Follow Obsidian keeps it in sync with Obsidian's language."),
         aliases: ['language', '语言', '中文'],
@@ -1054,6 +1127,10 @@ class NoteLockSettingTab extends PluginSettingTab {
       case 'allowLinkUpdates': return this.plugin.settings.allowLinkUpdates;
       case 'confirmUnlock': return this.plugin.settings.confirmUnlock;
       case 'language': return this.plugin.settings.language;
+      case 'restrictRead': return this.plugin.settings.restrictRead;
+      case 'restrictManualEdit': return this.plugin.settings.restrictManualEdit;
+      case 'restrictPluginEdit': return this.plugin.settings.restrictPluginEdit;
+      case 'restrictDelete': return this.plugin.settings.restrictDelete;
       default: return undefined;
     }
   }
@@ -1086,6 +1163,15 @@ class NoteLockSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
         this.plugin.applySettingsChange(false);
         new Notice(t('Language changed. Restart Obsidian to update command names.'));
+        return;
+      case 'restrictRead':
+      case 'restrictManualEdit':
+      case 'restrictPluginEdit':
+      case 'restrictDelete':
+        if (typeof value !== 'boolean') return;
+        this.plugin.settings[key] = value;
+        await this.plugin.saveSettings();
+        this.plugin.applySettingsChange(false);
         return;
     }
   }
@@ -1144,6 +1230,34 @@ class NoteLockSettingTab extends PluginSettingTab {
           this.plugin.settings.confirmUnlock = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName(t('Block viewing'))
+      .setDesc(t('When locked, close the file instead of showing its content in Obsidian. The file is still readable by other apps and search.'))
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.restrictRead)
+        .onChange((value) => void this.setControlValue('restrictRead', value)));
+
+    new Setting(containerEl)
+      .setName(t('Block manual editing'))
+      .setDesc(t('Make the editor read-only while the file is locked.'))
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.restrictManualEdit)
+        .onChange((value) => void this.setControlValue('restrictManualEdit', value)));
+
+    new Setting(containerEl)
+      .setName(t('Block plugin edits'))
+      .setDesc(t('Reject writes from other plugins while the file is locked. Manual saves are also rejected when this is on.'))
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.restrictPluginEdit)
+        .onChange((value) => void this.setControlValue('restrictPluginEdit', value)));
+
+    new Setting(containerEl)
+      .setName(t('Block deletion'))
+      .setDesc(t('Reject deleting the locked file inside Obsidian.'))
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.restrictDelete)
+        .onChange((value) => void this.setControlValue('restrictDelete', value)));
 
     new Setting(containerEl)
       .setName(t('Unlock password'))

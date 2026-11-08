@@ -29,6 +29,7 @@ const zh: Record<string, string> = {
 		'Page Lock：“{name}”中的链接在重命名更新前发生了变化，笔记未做修改。',
 	'"{name}" is locked — unlock to edit': '“{name}”已锁定 — 解锁后才能编辑',
 	'"{name}" is locked — unlock before deleting': '“{name}”已锁定 — 请先解锁再删除',
+	'"{name}" is locked — unlock it from the file menu to view': '“{name}”已锁定 — 请从文件菜单解锁后查看',
 	'Locked canvas "{name}"': '已锁定白板“{name}”',
 	'Unlocked canvas "{name}"': '已解锁白板“{name}”',
 
@@ -68,6 +69,18 @@ const zh: Record<string, string> = {
 	'Current password is incorrect.': '当前密码错误。',
 	'Password set.': '密码已设置。',
 	'Password cleared.': '密码已清除。',
+
+	'Lock restrictions': '锁定限制',
+	'Block viewing': '禁止查看',
+	'When locked, close the file instead of showing its content in Obsidian. The file is still readable by other apps and search.':
+		'锁定后关闭文件，不在 Obsidian 中显示内容。文件仍可能被其他应用或搜索读取。',
+	'Block manual editing': '禁止手动编辑',
+	'Make the editor read-only while the file is locked.': '锁定时编辑器只读，无法手动修改。',
+	'Block plugin edits': '禁止插件编辑',
+	'Reject writes from other plugins while the file is locked. Manual saves are also rejected when this is on.':
+		'锁定时拒绝其他插件写入；开启此项时手动保存也会被拒绝。',
+	'Block deletion': '禁止删除',
+	'Reject deleting the locked file inside Obsidian.': '在 Obsidian 内拒绝删除锁定文件。',
 
 	Language: '语言',
 	"Choose the language used by Page Lock. Follow Obsidian keeps it in sync with Obsidian's language.":
