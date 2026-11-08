@@ -1,0 +1,85 @@
+/* Note Lock — all selectors prefixed with note-lock-; colors come from
+   Obsidian theme variables so light/dark and community themes both work. */
+
+/* Keep viewing controls available; editing affordances return on unlock. */
+.note-lock-images-locked .image-resize-corner,
+.note-lock-images-locked .image-embed .edit-block-button,
+.note-lock-images-locked .ik-edit-btn,
+.note-lock-images-locked .simple-gallery-item-menu,
+.note-lock-images-locked .simple-gallery-settings-button,
+.note-lock-images-locked .simple-gallery-section-remove {
+  display: none !important;
+}
+
+.markdown-source-view.note-lock-has-banner {
+  display: flex;
+  flex-direction: column;
+}
+
+.note-lock-banner {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 12px 0;
+  padding: 5px 14px;
+  border-radius: var(--radius-xl, 24px);
+  background: hsla(var(--interactive-accent-hsl), 0.12);
+  border: 1px solid hsla(var(--interactive-accent-hsl), 0.25);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-tight, 1.3);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.note-lock-banner:hover,
+.note-lock-banner:focus-visible {
+  background: hsla(var(--interactive-accent-hsl), 0.2);
+  color: var(--text-normal);
+}
+
+.note-lock-banner-icon {
+  display: flex;
+  align-items: center;
+  color: var(--interactive-accent);
+}
+
+.note-lock-banner-icon svg {
+  width: var(--font-ui-smaller);
+  height: var(--font-ui-smaller);
+}
+
+.inline-title.note-lock-title-locked {
+  cursor: default;
+}
+
+/* The banner occupies its own row; let the editor use the remaining height. */
+body.is-mobile .markdown-source-view.note-lock-has-banner > .cm-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+body.is-mobile .note-lock-banner {
+  min-height: 44px;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto 12px;
+}
+
+/* Only used if Obsidian has not supplied a note-content container yet. */
+body.is-mobile .note-lock-banner-fallback {
+  margin-top: max(10px, env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+}
+
+/* Locked editors and YAML Properties' separate read-only preview remain
+   selectable without becoming editing hosts. Keep property controls guarded. */
+.cm-content[data-page-lock="true"],
+.note-lock-images-locked .yaml-properties-yaml-readonly {
+  user-select: text;
+  -webkit-user-select: text;
+}

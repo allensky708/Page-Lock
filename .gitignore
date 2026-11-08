@@ -1,0 +1,12 @@
+node_modules/
+.npm-cache/
+/main.js
+*.log
+.DS_Store
+/data.json
+
+__pycache__/
+*.pyc
+
+/test-results/
+/playwright-report/
