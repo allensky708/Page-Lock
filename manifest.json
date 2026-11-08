@@ -1,9 +1,9 @@
 {
   "id": "page-lock",
   "name": "Page Lock(中文版)",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "minAppVersion": "1.8.7",
-  "description": "锁定笔记，解锁前无法编辑；通过 frontmatter 同步锁定状态，阻止编辑器和其他插件写入。Lock notes against editing until unlocked, with a frontmatter-synced lock.",
+  "description": "锁定 Markdown 与 Canvas 白板，支持只读、Obsidian 内删除保护和密码解锁。Lock Markdown notes and canvases with password-protected unlock and in-app delete protection.",
   "author": "Robert Fleming, allensky708",
   "fundingUrl": "https://www.buymeacoffee.com/robertfleming",
   "isDesktopOnly": false,

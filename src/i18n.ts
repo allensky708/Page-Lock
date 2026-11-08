@@ -16,9 +16,11 @@ const zh: Record<string, string> = {
 	Unlock: '解锁',
 	Cancel: '取消',
 
-	'Toggle lock on current note': '切换当前笔记的锁定状态',
+	'Toggle lock on current file': '切换当前文件的锁定状态',
 	'Unlock note': '解锁笔记',
 	'Lock note': '锁定笔记',
+	'Unlock canvas': '解锁白板',
+	'Lock canvas': '锁定白板',
 
 	'Locked "{name}"': '已锁定“{name}”',
 	'Unlocked "{name}"': '已解锁“{name}”',
@@ -26,6 +28,9 @@ const zh: Record<string, string> = {
 	'Page Lock: links in "{name}" changed before the rename could update them; the note was left unchanged.':
 		'Page Lock：“{name}”中的链接在重命名更新前发生了变化，笔记未做修改。',
 	'"{name}" is locked — unlock to edit': '“{name}”已锁定 — 解锁后才能编辑',
+	'"{name}" is locked — unlock before deleting': '“{name}”已锁定 — 请先解锁再删除',
+	'Locked canvas "{name}"': '已锁定白板“{name}”',
+	'Unlocked canvas "{name}"': '已解锁白板“{name}”',
 
 	'Locked — {action} to unlock': '已锁定 — {action}解锁',
 	tap: '轻点',
@@ -43,6 +48,26 @@ const zh: Record<string, string> = {
 	'Confirm before unlocking': '解锁前确认',
 	'Ask for confirmation before unlocking a note, preventing accidental unlocks from a stray tap.':
 		'解锁笔记前先请求确认，避免误触导致意外解锁。',
+
+	'Enter password to unlock': '输入解锁密码',
+	Password: '密码',
+	'Incorrect password': '密码错误',
+	'Unlock password': '解锁密码',
+	'A password is set. Unlocking requires it.': '已设置密码，解锁时需要验证。',
+	'Set a password to require verification before unlocking a note or canvas. Only a hash is stored.':
+		'设置密码后，解锁笔记或白板前需要验证；仅保存密码哈希。',
+	'Set password': '设置密码',
+	'Change password': '修改密码',
+	'Clear password': '清除密码',
+	'Current password': '当前密码',
+	'New password': '新密码',
+	'Confirm new password': '确认新密码',
+	Save: '保存',
+	'Password must be at least 4 characters.': '密码至少需要 4 个字符。',
+	'Passwords do not match.': '两次输入的密码不一致。',
+	'Current password is incorrect.': '当前密码错误。',
+	'Password set.': '密码已设置。',
+	'Password cleared.': '密码已清除。',
 
 	Language: '语言',
 	"Choose the language used by Page Lock. Follow Obsidian keeps it in sync with Obsidian's language.":

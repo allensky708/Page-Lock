@@ -83,3 +83,9 @@ body.is-mobile .note-lock-banner-fallback {
   user-select: text;
   -webkit-user-select: text;
 }
+
+.note-lock-password-error {
+  margin: 0;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}

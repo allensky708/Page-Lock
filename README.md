@@ -5,6 +5,8 @@
 > 简体中文版由 [allensky708](https://github.com/allensky708) 维护，界面语言可在 **Settings → Page Lock → Language** 中切换。
 >
 > 本汉化仓库不使用 GitHub Actions，Release 由维护者手动创建。
+>
+> This fork adds Canvas locking, password-protected unlock, and in-app delete protection.
 
 Lock a note so it cannot be edited until you unlock it — like Notion's "lock page", but for
 Obsidian. A locked note shows a lock icon in the view header and an optional slim banner; unlock with a

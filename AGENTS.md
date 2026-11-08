@@ -41,3 +41,12 @@
 - `src/i18n.ts` holds the `zh` dictionary, auto-detects the Obsidian language, and exposes `initLocale()` for the `language` setting (`auto` / `en` / `zh`).
 - Add new UI text as an English key in `t()` and add the Chinese entry to `zh`; missing entries fall back to English.
 - Command and settings labels are evaluated at registration/render time. Changing the language takes effect for menus and new views immediately, but command names and already-open settings labels require reopening settings or restarting Obsidian.
+
+
+## Canvas and password protection
+
+- Canvas locks are path-based (`lockedCanvasPaths` in `data.json`) because `.canvas` files have no frontmatter. `refreshCanvasView` applies the lock with the internal `CanvasViewCanvas.setReadOnly()` (falling back to `canvas.readOnly`) and adds a header lock action.
+- `isGuarded` covers both Markdown and locked Canvas files, so `vault.modify`/`process` writes are rejected even if the Canvas read-only API changes.
+- Deletion protection patches `vault.delete`, `vault.trash`, and `fileManager.trashFile`. It blocks Obsidian-internal deletion only; Finder, terminal `rm`, and sync clients bypass it.
+- The unlock password is stored as a salted PBKDF2-SHA256 hash plus salt (`passwordHash`/`passwordSalt`). Never store plaintext. The settings modal and unlock prompt use masked `type="password"` inputs.
+- Passwords are a UI gate, not encryption; a user with filesystem access can still edit the vault or `data.json`.

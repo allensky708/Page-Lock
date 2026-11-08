@@ -1,5 +1,6 @@
 import {
   App,
+  type ItemView,
   MarkdownView,
   Modal,
   Notice,
@@ -8,6 +9,7 @@ import {
   PluginSettingTab,
   Setting,
   SettingDefinitionItem,
+  type TAbstractFile,
   TFile,
   editorInfoField,
   setIcon
@@ -17,6 +19,7 @@ import { EditorView } from '@codemirror/view';
 import { applyLinkUpdates, LinkUpdateBatch } from './link-updates';
 import { applyGalleryLinkUpdates as applyGalleryUpdates, GalleryLinkUpdate, GalleryUpdateStatus } from './gallery-links';
 import { initLocale, t } from './i18n';
+import { createSalt, hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from './password';
 
 /** Marks note-lock's own editor re-sync transactions so the filter lets them through. */
 const reloadAnnotation = Annotation.define<boolean>();
@@ -29,6 +32,9 @@ interface NoteLockSettings {
   showLockBanner: boolean;
   allowLinkUpdates: boolean;
   language: 'auto' | 'en' | 'zh';
+  lockedCanvasPaths: string[];
+  passwordHash: string;
+  passwordSalt: string;
 }
 
 const DEFAULT_SETTINGS: NoteLockSettings = {
@@ -36,7 +42,10 @@ const DEFAULT_SETTINGS: NoteLockSettings = {
   confirmUnlock: false,
   showLockBanner: true,
   allowLinkUpdates: true,
-  language: 'auto'
+  language: 'auto',
+  lockedCanvasPaths: [],
+  passwordHash: '',
+  passwordSalt: ''
 };
 
 // --- Constants --------------------------------------------------------------
@@ -46,6 +55,16 @@ const HAS_BANNER_CLASS = 'note-lock-has-banner';
 const ACTION_CLASS = 'note-lock-action';
 const TITLE_LOCKED_CLASS = 'note-lock-title-locked';
 const NOTICE_DEBOUNCE_MS = 2000;
+
+interface CanvasViewLike extends ItemView {
+  file?: TFile;
+  canvas?: {
+    readonly?: boolean;
+    readOnly?: boolean;
+    setReadOnly?: (readOnly: boolean) => void;
+    setReadonly?: (readOnly: unknown) => unknown;
+  };
+}
 
 
 // --- Helpers ----------------------------------------------------------------
@@ -96,6 +115,175 @@ class ConfirmUnlockModal extends Modal {
   }
 }
 
+
+/** Masked password prompt used before unlocking anything. */
+class PasswordPromptModal extends Modal {
+  private resolved = false;
+  private value = '';
+
+  static ask(app: App, title: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      new PasswordPromptModal(app, title, resolve).open();
+    });
+  }
+
+  constructor(
+    app: App,
+    private readonly title: string,
+    private readonly resolve: (value: string | null) => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.setTitle(this.title);
+    new Setting(this.contentEl).addText((text) => {
+      text.inputEl.type = 'password';
+      text.inputEl.autocomplete = 'off';
+      text.inputEl.setAttribute('aria-label', t('Password'));
+      text.onChange((value) => (this.value = value));
+      text.inputEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.submit();
+        }
+      });
+      window.setTimeout(() => text.inputEl.focus(), 0);
+    });
+    new Setting(this.contentEl)
+      .addButton((button) => button
+        .setButtonText(t('Unlock'))
+        .setCta()
+        .onClick(() => this.submit()))
+      .addButton((button) => button
+        .setButtonText(t('Cancel'))
+        .onClick(() => this.close()));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.resolved) {
+      this.resolved = true;
+      this.resolve(null);
+    }
+  }
+
+  private submit(): void {
+    if (this.resolved) return;
+    this.resolved = true;
+    this.resolve(this.value);
+    this.close();
+  }
+}
+
+/** Set, change, or clear the unlock password. All inputs are masked. */
+class PasswordSettingsModal extends Modal {
+  private current = '';
+  private next = '';
+  private confirm = '';
+  private errorEl!: HTMLElement;
+
+  constructor(app: App, private readonly plugin: NoteLockPlugin) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const hasPassword = this.plugin.settings.passwordHash.length > 0;
+    this.setTitle(hasPassword ? t('Change password') : t('Set password'));
+
+    if (hasPassword) {
+      this.addPasswordField(t('Current password'), (value) => (this.current = value));
+    }
+    this.addPasswordField(t('New password'), (value) => (this.next = value));
+    this.addPasswordField(t('Confirm new password'), (value) => (this.confirm = value));
+
+    this.errorEl = this.contentEl.createEl('p', { cls: 'note-lock-password-error' });
+
+    new Setting(this.contentEl)
+      .addButton((button) => button
+        .setButtonText(t('Save'))
+        .setCta()
+        .onClick(() => void this.save()))
+      .addButton((button) => button
+        .setButtonText(t('Cancel'))
+        .onClick(() => this.close()));
+
+    if (hasPassword) {
+      new Setting(this.contentEl).addButton((button) => button
+        .setButtonText(t('Clear password'))
+        .onClick(() => void this.clear()));
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private addPasswordField(name: string, onChange: (value: string) => void): void {
+    new Setting(this.contentEl).setName(name).addText((text) => {
+      text.inputEl.type = 'password';
+      text.inputEl.autocomplete = 'off';
+      text.onChange(onChange);
+    });
+  }
+
+  private setError(message: string): void {
+    this.errorEl.setText(message);
+  }
+
+  private async verifyCurrent(): Promise<boolean> {
+    if (!this.plugin.settings.passwordHash) return true;
+    if (!this.current) {
+      this.setError(t('Current password is incorrect.'));
+      return false;
+    }
+    try {
+      const ok = await verifyPassword(
+        this.current,
+        this.plugin.settings.passwordHash,
+        this.plugin.settings.passwordSalt
+      );
+      if (!ok) this.setError(t('Current password is incorrect.'));
+      return ok;
+    } catch {
+      this.setError(t('Current password is incorrect.'));
+      return false;
+    }
+  }
+
+  private async save(): Promise<void> {
+    if (!(await this.verifyCurrent())) return;
+    if (this.next.length < MIN_PASSWORD_LENGTH) {
+      this.setError(t('Password must be at least 4 characters.'));
+      return;
+    }
+    if (this.next !== this.confirm) {
+      this.setError(t('Passwords do not match.'));
+      return;
+    }
+    try {
+      const salt = createSalt();
+      const hash = await hashPassword(this.next, salt);
+      this.plugin.settings.passwordHash = hash;
+      this.plugin.settings.passwordSalt = salt;
+      await this.plugin.saveSettings();
+      this.close();
+      new Notice(t('Password set.'));
+    } catch {
+      this.setError(t('Password must be at least 4 characters.'));
+    }
+  }
+
+  private async clear(): Promise<void> {
+    if (!(await this.verifyCurrent())) return;
+    this.plugin.settings.passwordHash = '';
+    this.plugin.settings.passwordSalt = '';
+    await this.plugin.saveSettings();
+    this.close();
+    new Notice(t('Password cleared.'));
+  }
+}
+
 // --- Plugin -----------------------------------------------------------------
 
 export default class NoteLockPlugin extends Plugin {
@@ -138,7 +326,6 @@ export default class NoteLockPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    initLocale(this.settings.language);
 
     this.registerEditorExtension([
       EditorState.transactionFilter.of((tr) => {
@@ -172,28 +359,45 @@ export default class NoteLockPlugin extends Plugin {
 
     this.addCommand({
       id: 'toggle-lock',
-      name: t('Toggle lock on current note'),
+      name: t('Toggle lock on current file'),
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== 'md') return false;
+        if (!file || (file.extension !== 'md' && file.extension !== 'canvas')) return false;
         if (!checking) {
-          if (this.isFileLocked(file)) void this.unlockFlow(file);
-          else void this.setLocked(file, true);
+          if (file.extension === 'canvas') {
+            if (this.isCanvasLocked(file.path)) void this.unlockCanvasFlow(file);
+            else void this.setCanvasLocked(file, true);
+          } else if (this.isFileLocked(file)) {
+            void this.unlockFlow(file);
+          } else {
+            void this.setLocked(file, true);
+          }
         }
         return true;
       }
     });
 
     this.registerEvent(this.app.workspace.on('file-menu', (menu, abstractFile) => {
-      if (!(abstractFile instanceof TFile) || abstractFile.extension !== 'md') return;
-      const locked = this.isFileLocked(abstractFile);
+      if (!(abstractFile instanceof TFile)) return;
+      if (abstractFile.extension !== 'md' && abstractFile.extension !== 'canvas') return;
+      const isCanvas = abstractFile.extension === 'canvas';
+      const locked = isCanvas ? this.isCanvasLocked(abstractFile.path) : this.isFileLocked(abstractFile);
+      const label = isCanvas
+        ? t(locked ? 'Unlock canvas' : 'Lock canvas')
+        : t(locked ? 'Unlock note' : 'Lock note');
       menu.addItem((item) => item
-        .setTitle(t(locked ? 'Unlock note' : 'Lock note'))
+        .setTitle(label)
         .setIcon(locked ? 'lock-open' : 'lock')
         .setSection('action')
         .onClick(() => {
-          if (locked) void this.unlockFlow(abstractFile);
-          else void this.setLocked(abstractFile, true);
+          if (isCanvas) {
+            if (locked) void this.unlockCanvasFlow(abstractFile);
+            else void this.setCanvasLocked(abstractFile, true);
+          } else if (locked) {
+            void this.unlockFlow(abstractFile);
+          } else {
+            void this.setLocked(abstractFile, true);
+          }
         }));
     }));
 
@@ -206,11 +410,21 @@ export default class NoteLockPlugin extends Plugin {
       this.lockStates.delete(oldPath);
       this.noticeTimes.delete(oldPath);
       if (state !== undefined) this.lockStates.set(abstractFile.path, state);
+      const canvasIndex = this.settings.lockedCanvasPaths.indexOf(oldPath);
+      if (canvasIndex !== -1) {
+        this.settings.lockedCanvasPaths[canvasIndex] = abstractFile.path;
+        void this.saveSettings();
+      }
     }));
 
     this.registerEvent(this.app.vault.on('delete', (abstractFile) => {
       this.lockStates.delete(abstractFile.path);
       this.noticeTimes.delete(abstractFile.path);
+      const canvasIndex = this.settings.lockedCanvasPaths.indexOf(abstractFile.path);
+      if (canvasIndex !== -1) {
+        this.settings.lockedCanvasPaths.splice(canvasIndex, 1);
+        void this.saveSettings();
+      }
     }));
 
     // Obsidian's disk->editor reload is not always the full-document replacement
@@ -233,10 +447,27 @@ export default class NoteLockPlugin extends Plugin {
 
   onunload(): void {
     for (const view of this.allMarkdownViews()) this.clearViewDecorations(view);
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.view.getViewType() !== 'canvas') return;
+      const canvas = (leaf.view as CanvasViewLike).canvas;
+      if (!canvas) return;
+      if (typeof canvas.setReadonly === 'function') canvas.setReadonly(false);
+      else if (typeof canvas.setReadOnly === 'function') canvas.setReadOnly(false);
+      else {
+        canvas.readonly = false;
+        canvas.readOnly = false;
+      }
+    });
   }
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<NoteLockSettings> | null);
+    this.settings.lockedCanvasPaths = Array.isArray(this.settings.lockedCanvasPaths)
+      ? this.settings.lockedCanvasPaths.filter((path): path is string => typeof path === 'string')
+      : [];
+    this.settings.passwordHash = typeof this.settings.passwordHash === 'string' ? this.settings.passwordHash : '';
+    this.settings.passwordSalt = typeof this.settings.passwordSalt === 'string' ? this.settings.passwordSalt : '';
+    initLocale(this.settings.language);
   }
 
   async saveSettings(): Promise<void> {
@@ -354,11 +585,31 @@ export default class NoteLockPlugin extends Plugin {
   }
 
   private async unlockFlow(file: TFile): Promise<void> {
-    if (this.settings.confirmUnlock) {
+    if (this.settings.passwordHash) {
+      if (!(await this.requireUnlockPassword())) return;
+    } else if (this.settings.confirmUnlock) {
       const confirmed = await ConfirmUnlockModal.confirm(this.app, file.basename);
       if (!confirmed) return;
     }
     await this.setLocked(file, false);
+  }
+
+  private async requireUnlockPassword(): Promise<boolean> {
+    if (!this.settings.passwordHash) return true;
+    const password = await PasswordPromptModal.ask(this.app, t('Enter password to unlock'));
+    if (password === null) return false;
+    try {
+      const ok = await verifyPassword(
+        password,
+        this.settings.passwordHash,
+        this.settings.passwordSalt
+      );
+      if (!ok) new Notice(t('Incorrect password'));
+      return ok;
+    } catch {
+      new Notice(t('Incorrect password'));
+      return false;
+    }
   }
 
   // --- Vault guard (blocks writes from any plugin, not just the editor) ---
@@ -372,6 +623,34 @@ export default class NoteLockPlugin extends Plugin {
     this.installLinkUpdateHandler(originalProcess);
     const fileManager = this.app.fileManager;
     const originalFrontMatter = fileManager.processFrontMatter.bind(fileManager);
+    const originalDelete = typeof vault.delete === 'function' ? vault.delete.bind(vault) : null;
+    const originalTrash = typeof vault.trash === 'function' ? vault.trash.bind(vault) : null;
+    const originalTrashFile = typeof fileManager.trashFile === 'function'
+      ? fileManager.trashFile.bind(fileManager)
+      : null;
+    const rejectDelete = (file: TAbstractFile): void => {
+      if (!this.isProtected(file)) return;
+      new Notice(t('"{name}" is locked — unlock before deleting', { name: file.name }));
+      throw new Error(`Page Lock: "${file.path}" is locked`);
+    };
+    if (originalDelete) {
+      vault.delete = async (file, force) => {
+        rejectDelete(file);
+        return originalDelete(file, force);
+      };
+    }
+    if (originalTrash) {
+      vault.trash = async (file, system) => {
+        rejectDelete(file);
+        return originalTrash(file, system);
+      };
+    }
+    if (originalTrashFile) {
+      fileManager.trashFile = async (file) => {
+        rejectDelete(file);
+        return originalTrashFile(file);
+      };
+    }
     const guard = (file: TFile): Promise<never> | null => this.guardRejection(file);
 
     // The read-only editor still flushes saves (mode switches, interval saves);
@@ -410,6 +689,9 @@ export default class NoteLockPlugin extends Plugin {
       vault.modify = originalModify;
       vault.append = originalAppend;
       vault.process = originalProcess;
+      if (originalDelete) vault.delete = originalDelete;
+      if (originalTrash) vault.trash = originalTrash;
+      if (originalTrashFile) fileManager.trashFile = originalTrashFile;
     });
   }
 
@@ -471,8 +753,17 @@ export default class NoteLockPlugin extends Plugin {
   }
 
   private isGuarded(file: TFile): boolean {
-    if (!(file instanceof TFile) || file.extension !== 'md') return false;
-    return file.path !== this.bypassPath && this.isFileLocked(file);
+    if (!(file instanceof TFile)) return false;
+    const locked = file.extension === 'canvas'
+      ? this.isCanvasLocked(file.path)
+      : file.extension === 'md' && this.isFileLocked(file);
+    return file.path !== this.bypassPath && locked;
+  }
+
+  private isProtected(file: TAbstractFile): boolean {
+    if (!(file instanceof TFile)) return false;
+    if (file.extension === 'canvas') return this.isCanvasLocked(file.path);
+    return file.extension === 'md' && this.isFileLocked(file);
   }
 
   private guardRejection(file: TFile): Promise<never> | null {
@@ -500,7 +791,55 @@ export default class NoteLockPlugin extends Plugin {
   }
 
   refreshAllViews(): void {
-    for (const view of this.allMarkdownViews()) this.refreshView(view);
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (view instanceof MarkdownView) this.refreshView(view);
+      else if (view.getViewType() === 'canvas') this.refreshCanvasView(view as CanvasViewLike);
+    });
+  }
+
+  isCanvasLocked(path: string): boolean {
+    return this.settings.lockedCanvasPaths.includes(path);
+  }
+
+  private async setCanvasLocked(file: TFile, locked: boolean): Promise<void> {
+    const paths = new Set(this.settings.lockedCanvasPaths);
+    if (locked) paths.add(file.path);
+    else paths.delete(file.path);
+    this.settings.lockedCanvasPaths = [...paths];
+    await this.saveSettings();
+    this.refreshAllViews();
+    new Notice(t(locked ? 'Locked canvas "{name}"' : 'Unlocked canvas "{name}"', { name: file.basename }));
+  }
+
+  private async unlockCanvasFlow(file: TFile): Promise<void> {
+    if (this.settings.passwordHash) {
+      if (!(await this.requireUnlockPassword())) return;
+    } else if (this.settings.confirmUnlock) {
+      const confirmed = await ConfirmUnlockModal.confirm(this.app, file.basename);
+      if (!confirmed) return;
+    }
+    await this.setCanvasLocked(file, false);
+  }
+
+  private refreshCanvasView(view: CanvasViewLike): void {
+    const file = view.file;
+    if (!file || file.extension !== 'canvas') return;
+    const locked = this.isCanvasLocked(file.path);
+    const canvas = view.canvas;
+    if (canvas) {
+      if (typeof canvas.setReadonly === 'function') canvas.setReadonly(locked);
+      else if (typeof canvas.setReadOnly === 'function') canvas.setReadOnly(locked);
+      else {
+        canvas.readonly = locked;
+        canvas.readOnly = locked;
+      }
+    }
+    view.containerEl.querySelectorAll(`.${ACTION_CLASS}`).forEach((el) => el.remove());
+    const action = locked
+      ? view.addAction('lock', t('Unlock canvas'), () => void this.unlockCanvasFlow(file))
+      : view.addAction('lock-open', t('Lock canvas'), () => void this.setCanvasLocked(file, true));
+    action.addClass(ACTION_CLASS);
   }
 
   /** Stop widgets before their handlers update local state or queue a save. */
@@ -679,6 +1018,18 @@ class NoteLockSettingTab extends PluginSettingTab {
         }
       },
       {
+        name: t('Unlock password'),
+        desc: this.plugin.settings.passwordHash
+          ? t('A password is set. Unlocking requires it.')
+          : t('Set a password to require verification before unlocking a note or canvas. Only a hash is stored.'),
+        aliases: ['password', '密码', '解锁'],
+        render: (setting) => {
+          setting.addButton((button) => button
+            .setButtonText(this.plugin.settings.passwordHash ? t('Change password') : t('Set password'))
+            .onClick(() => new PasswordSettingsModal(this.app, this.plugin).open()));
+        }
+      },
+      {
         name: t('Language'),
         desc: t("Choose the language used by Page Lock. Follow Obsidian keeps it in sync with Obsidian's language."),
         aliases: ['language', '语言', '中文'],
@@ -793,6 +1144,15 @@ class NoteLockSettingTab extends PluginSettingTab {
           this.plugin.settings.confirmUnlock = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(containerEl)
+      .setName(t('Unlock password'))
+      .setDesc(this.plugin.settings.passwordHash
+        ? t('A password is set. Unlocking requires it.')
+        : t('Set a password to require verification before unlocking a note or canvas. Only a hash is stored.'))
+      .addButton((button) => button
+        .setButtonText(this.plugin.settings.passwordHash ? t('Change password') : t('Set password'))
+        .onClick(() => new PasswordSettingsModal(this.app, this.plugin).open()));
 
     new Setting(containerEl)
       .setName(t('Language'))
